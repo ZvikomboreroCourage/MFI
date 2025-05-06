@@ -585,33 +585,80 @@ def application_screening_tab():
 
         submitted = st.form_submit_button("🧠 Predict Risk")
 
-    if submitted:
-        input_dict = {
-            "age": age,
-            "gender": label_encoders["gender"].transform([gender])[0],
-            "marital_status": label_encoders["marital_status"].transform([marital_status])[0],
-            "employment_type": label_encoders["employment_type"].transform([employment_type])[0],
-            "monthly_income_usd": monthly_income,
-            "number_of_dependents": number_of_dependents,
-            "education_level": label_encoders["education_level"].transform([education_level])[0],
-            "loan_amount_usd": loan_amount_usd,
-            "loan_type": label_encoders["loan_type"].transform([loan_type])[0],
-            "repayment_period_months": repayment_period,
-            "interest_rate_percent": interest_rate,
-            "purpose_of_loan": label_encoders["purpose_of_loan"].transform([purpose])[0],
-            "residential_area_type": label_encoders["residential_area_type"].transform([area_type])[0],
-            "sector_of_activity": label_encoders["sector_of_activity"].transform([sector])[0]
-        }
+        if submitted:
+            input_dict = {
+                "age": age,
+                "gender": label_encoders["gender"].transform([gender])[0],
+                "marital_status": label_encoders["marital_status"].transform([marital_status])[0],
+                "employment_type": label_encoders["employment_type"].transform([employment_type])[0],
+                "monthly_income_usd": monthly_income,
+                "number_of_dependents": number_of_dependents,
+                "education_level": label_encoders["education_level"].transform([education_level])[0],
+                "loan_amount_usd": loan_amount_usd,
+                "loan_type": label_encoders["loan_type"].transform([loan_type])[0],
+                "repayment_period_months": repayment_period,
+                "interest_rate_percent": interest_rate,
+                "purpose_of_loan": label_encoders["purpose_of_loan"].transform([purpose])[0],
+                "residential_area_type": label_encoders["residential_area_type"].transform([area_type])[0],
+                "sector_of_activity": label_encoders["sector_of_activity"].transform([sector])[0]
+            }
 
-        input_array = scaler.transform([list(input_dict.values())])
-        prediction = model.predict(input_array)[0]
-        prob = model.predict_proba(input_array)[0][prediction]
-        risk_label = "✅ Low Risk" if prediction == 0 else "⚠️ High Risk"
+            input_array = scaler.transform([list(input_dict.values())])
+            model_pred = model.predict(input_array)[0]
+            pd_score = model.predict_proba(input_array)[0][1]  # Probability of default (class 1)
 
-        st.success(f"**Predicted Credit Risk:** {risk_label}")
-        st.info(f"**Confidence Score:** {prob:.2%}")
-    
+            # Rule-based assessment
+            rule_flags = []
+            critical_violations = 0
 
+            # Rule 1: Age extremes
+            if age < 21 or age > 60:
+                rule_flags.append("Age is outside the preferred lending bracket (21–60)")
+                critical_violations += 1
+
+            # Rule 2: High number of dependents
+            if number_of_dependents > 3:
+                rule_flags.append("More than 3 dependents may strain income")
+                critical_violations += 1
+
+            # Rule 3: Income-to-loan ratio
+            monthly_instalment_est = (loan_amount_usd * (1 + (interest_rate / 100))) / repayment_period
+            if monthly_instalment_est > 0.4 * monthly_income:
+                rule_flags.append(f"Loan burden ({monthly_instalment_est:.2f}) exceeds 40% of monthly income ({monthly_income:.2f})")
+                critical_violations += 1
+
+            # Rule 4: Very low income
+            if monthly_income < 80:
+                rule_flags.append("Monthly income is below sustainable threshold ($80)")
+                critical_violations += 1
+
+            # Rule 5: Unemployed applicants
+            if employment_type == "Unemployed":
+                rule_flags.append("Unemployment increases risk of default")
+                critical_violations += 1
+
+            # Final logic: Override model if 2+ critical rules triggered
+            if critical_violations >= 2:
+                final_prediction = 1
+                overridden = True
+            else:
+                final_prediction = model_pred
+                overridden = False
+
+            # Display results
+            risk_label = "✅ Low Risk" if final_prediction == 0 else "⚠️ High Risk"
+            st.success(f"**Final Risk Assessment:** {risk_label}")
+            st.info(f"**Model-predicted Probability of Default (PD):** {pd_score:.2%}")
+
+            if rule_flags:
+                st.warning("📋 Rule-based risk insights:")
+                for flag in rule_flags:
+                    st.markdown(f"- {flag}")
+
+            if overridden:
+                st.markdown("🔁 *Model risk prediction overridden based on multiple high-risk flags*")
+
+        
 # Main App
 def main_app():
     selected_tab = sidebar()
